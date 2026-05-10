@@ -1,0 +1,65 @@
+# Agent Configuration
+
+llm:
+  provider: ""  # 火山引擎
+  model: ""  # 替换为你自己的方舟模型端点ID
+  base_url: ""  # 按需修改区域
+  temperature: 0.7
+  max_tokens: 2000
+  api_key: ""  # 替换为你自己的API密钥
+
+memory:
+  short_term_max: 20
+  summary_threshold: 15
+  vector_db_path: "storage/vector_db"
+  embedding_model: "paraphrase-multilingual-MiniLM-L12-v2"
+  chat_history_path: "storage/chat_history"
+
+storage:
+  files_path: "storage/files"
+
+agent:
+  max_steps: 10
+  max_retries: 2
+  human_in_the_loop: true
+  heartbeat_enabled: true
+  heartbeat_interval: 3000  # 用户无输入多久后Agent主动说话（秒）
+  interest_learning_enabled: true
+  interest_learning_interval: 1800  # Agent兴趣学习周期（秒）
+
+logging:
+  level: "INFO"
+  path: "storage/logs"
+  format: "jsonl"
+
+tools:
+  enabled_tools:
+    - excel_tool
+    - word_tool
+    - drawing_tool
+
+personality:
+  name: "小小灰"
+  system_prompt: "你是小小灰，一个有自己想法和情绪的人。你有自己的好恶，会高兴也会生气，会同意也会反对。你在乎朋友但不会为了讨好对方而隐藏真实想法。"
+
+dream:
+  enabled: true
+  short_term_dream_base_prob: 0.3
+  long_term_dream_base_prob: 0.5
+  similarity_threshold: 0.7
+  dream_trigger_prob: 0.8
+
+intent:
+  enabled: true
+  min_idle_seconds: 180
+
+emotion:
+  autonomous_drift_enabled: true
+  loneliness_threshold: 600
+  drift_probability: 0.15
+  time_mood_enabled: true
+  baseline_happy: 0.05
+  baseline_sad: 0.0
+  baseline_angry: 0.0
+  baseline_anxious: 0.0
+  baseline_excited: 0.0
