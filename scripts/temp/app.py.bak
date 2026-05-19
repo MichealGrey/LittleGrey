@@ -261,8 +261,6 @@ class AgentApp:
         if triggered:
             self.logger.log("emotion", "triggers", output_data=triggered)
 
-        self._check_memory_recall_trigger(user_input)
-
         messages = self.short_term.get_messages()
         if rag_context:
             messages.append({"role": "system", "content": rag_context})
@@ -373,20 +371,6 @@ class AgentApp:
                     f"用户情绪[{emo}]: {user_input}",
                     metadata={"type": "emotional_event", "emotion": emo},
                 )
-
-    def _check_memory_recall_trigger(self, user_input: str) -> None:
-        recall_keywords = ['记得', '还记得', '之前', '以前', '之前做', '之前说']
-        if any(kw in user_input for kw in recall_keywords):
-            recent_memories = self.long_term.search(user_input, top_k=3)
-            if recent_memories:
-                for mem in recent_memories:
-                    mem_type = mem.get('metadata', {}).get('type', '')
-                    emotion_impact = mem.get('metadata', {}).get('emotion_impact', {})
-                    if mem_type or emotion_impact:
-                        self.emotion.recall_trigger({
-                            'type': mem_type,
-                            'emotion_impact': emotion_impact
-                        })
 
     def _display_response(self, response: str) -> None:
         mods = self.emotion.get_behavior_modifiers()

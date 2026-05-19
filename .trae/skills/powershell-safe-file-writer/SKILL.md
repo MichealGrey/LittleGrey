@@ -1,67 +1,136 @@
 ---
-name: powershell-safe-file-writer
-description: Safely write large files with CJK content on Windows PowerShell. Invoke when writing files with Chinese content or PSReadLine buffer overflow occurs.
+name: "powershell-safe-file-writer"
+description: "Safely write large files with CJK content on Windows PowerShell. Invoke when writing files with Chinese content or PSReadLine buffer overflow occurs."
 ---
 
 # PowerShell Safe File Writer
 
 ## Problem
 
-On Windows, PowerShell PSReadLine has a limited console buffer. When using python -c with long Chinese/CJK content, PSReadLine crashes with System.ArgumentOutOfRangeException. This makes it impossible to write large files with Chinese content directly through shell commands.
+When writing files on Windows PowerShell with long Chinese content, several issues occur:
 
-## Solution: Chunked Base64 Encoding
+1. **PSReadLine buffer overflow** - long commands fail with "system.console.setcursorposition" errors
+2. **Unicode errors** - Chinese characters get corrupted in command lines
+3. **String literal errors** - multiline strings get truncated or malformed
+4. **Base64 length limits** - even base64-encoded content can exceed PowerShell command line limits
 
-Split file content into chunks, base64-encode each chunk, write encoded chunks to temp files, then assemble and decode into the final file.
+## 推荐方案：临时脚本写入法（最简单可靠）
 
-## Workflow
+对于需要写入中文/长内容的文件，最佳方案是：
 
-### Step 1: Build content using unicode escapes
+1. 用 Write 工具创建一个临时 Python 脚本（脚本内容包含要写入的文件内容）
+2. 运行这个脚本
+3. 脚本执行后删除自己
 
-Use chr(10).join([...]) with unicode escape sequences (backslash-u-XXXX) to build text content. This avoids shell encoding issues.
+### 示例
 
-Key tricks:
-- Use chr(10) for newlines (avoids escaping issues)
-- Use chr(96)*3 for triple backticks (avoids shell interpretation)
-- Use backslash-u-XXXX for all CJK characters
-- Avoid raw backticks, quotes, and special chars in the Python string literal
+**目标**：创建 `docs/my_plan.md`，内容包含大量中文
 
-### Step 2: Base64-encode and save each chunk
-
-After building the content string, base64-encode and write to a temp file. Keep each chunk under ~2500 base64 characters. Split into multiple chunks if needed.
-
-### Step 3: Assemble all chunks into the final file
-
-After all chunks are written, decode and concatenate them:
+**步骤 1：创建临时脚本**
 
 ```python
-import pathlib, base64
-chunks = ["docs/chunk1_b64.txt", "docs/chunk2_b64.txt"]
-full_doc = ""
-for f in chunks:
-    b64 = pathlib.Path(f).read_text("ascii")
-    full_doc += base64.b64decode(b64).decode("utf-8")
-pathlib.Path("docs/final-file.md").write_text(full_doc, encoding="utf-8")
+# 文件名: _write_file.py
+
+content = '''# 我的计划
+
+这是一个包含大量中文内容的文件...
+
+# 完整内容在这里
+'''
+
+with open('docs/my_plan.md', 'w', encoding='utf-8') as f:
+    f.write(content)
+
+import os
+os.remove(__file__)  # 删除自己
 ```
 
-### Step 4: Post-processing fixes
+**步骤 2：运行脚本**
 
-Apply fixes for missing blank lines, backtick formatting, etc using pathlib read_text/write_text.
+```shell
+python _write_file.py
+```
 
-### Step 5: Clean up temp files
+### 优点
 
-Delete all chunk*b64.txt temp files after assembly.
+- ✅ 完全绕过 PowerShell 命令长度限制
+- ✅ 中文内容不经过命令行，不会被转义
+- ✅ 只需两步操作，简单可靠
+- ✅ 脚本执行后自动删除，不残留
 
-## Tips
+---
 
-1. Keep each RunCommand under ~2500 chars of base64
-2. Use pathlib.Path.write_text() not open() - handles encoding reliably
-3. Avoid PowerShell echo/Set-content - they add BOM
-4. Use chr(96) instead of backticks in Python strings
-5. For small files under 500 chars of CJK, use direct write
+## 方案二：Base64 编码法（适用于较短内容）
+
+对于较短的文件内容（base64 后 < 2000 字符）：
+
+### Step 1: Encode Content in Base64
+
+```python
+import base64
+content = """your chinese content here"""
+encoded = base64.b64encode(content.encode('utf-8')).decode().strip()
+print(encoded)
+```
+
+### Step 2: Use Short Command to Decode and Write
+
+```shell
+python -c "import base64; open('path/to/file', 'w', encoding='utf-8').write(base64.b64decode('BASE64_CONTENT').decode('utf-8'))"
+```
+
+### Step 3: For Very Large Files, Split into Chunks
+
+```shell
+python -c "import base64; open('file.py', 'w', encoding='utf-8').write(base64.b64decode('CHUNK_1').decode('utf-8'))"
+python -c "import base64; open('file.py', 'a', encoding='utf-8').write(base64.b64decode('CHUNK_2').decode('utf-8'))"
+```
+
+Note: Use `'a'` mode (append) for subsequent chunks.
+
+---
+
+## 方案三：PowerShell Here-String（简单文件）
+
+对于简单的、不需要在代码中包含三引号的文件：
+
+```shell
+@"
+file content here
+"@ | Out-File -FilePath "path/to/file" -Encoding utf8
+```
+
+**注意**：如果内容包含 `'''` 或 `"""`，此方法不适用，因为会和 PowerShell here-string 冲突。
+
+---
+
+## 决策流程
+
+```
+需要写入中文/长内容？
+    │
+    ├── 是 → 方案一：临时脚本写入法（推荐）
+    │
+    └── 否 → 检查内容长度
+             │
+             ├── base64 < 2000 字符 → 方案二：Base64 编码
+             │
+             └── 内容简单，不含三引号 → 方案三：Here-String
+```
+
+---
 
 ## When to Use
 
-- Writing .md, .txt, .py files with Chinese/CJK content on Windows
-- When python -c with Chinese causes PSReadLine crash
-- When writing docs, config files, or code comments in Chinese
-- When file content exceeds ~500 characters of CJK text
+- Writing files with Chinese/CJK content
+- PowerShell buffer overflow errors
+- Unicode errors in command lines
+- Multiline string issues in PowerShell
+- Content contains triple quotes (`'''` or `"""`)
+
+## 最佳实践
+
+1. **首选临时脚本写入法** - 最可靠，无长度限制
+2. 总是指定 `encoding='utf-8'`
+3. 写入后验证文件内容（Read 工具）
+4. 临时脚本执行后自动删除

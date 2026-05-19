@@ -61,7 +61,27 @@ class LoggingConfig:
 
 
 @dataclass
+class DecayStrategyConfig:
+    strategy_type: str = "exponential"
+    rate: float = 0.02
+    duration_hours: float = 5.0
+    interval_hours: float = 1.0
+    decay_factor: float = 0.5
+
+@dataclass
 class EmotionConfig:
+    dimensions: list[str] = field(default_factory=lambda: [
+        'happy', 'sad', 'angry', 'anxious', 'excited'
+    ])
+    decay_strategies: dict[str, DecayStrategyConfig] = field(default_factory=lambda: {
+        'happy': DecayStrategyConfig(strategy_type='exponential', rate=0.05),
+        'excited': DecayStrategyConfig(strategy_type='exponential', rate=0.06),
+        'sad': DecayStrategyConfig(strategy_type='exponential', rate=0.02),
+        'angry': DecayStrategyConfig(strategy_type='slow_negative', rate=0.003),
+        'anxious': DecayStrategyConfig(strategy_type='exponential', rate=0.025),
+    })
+    default_strategy: str = "exponential"
+    min_threshold: float = 0.005
     autonomous_drift_enabled: bool = True
     loneliness_threshold: int = 600
     drift_probability: float = 0.15

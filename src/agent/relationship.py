@@ -21,46 +21,63 @@ class RelationshipState:
         self.positive_interactions = positive_interactions
         self.last_seen = last_seen
         self.shared_experiences = shared_experiences or []
+        self._familiarity_cache: str | None = None
+        self._absence_hours_cache: float | None = None
+        self._absence_reaction_cache: str | None = None
+        self._last_computed_time: float = 0
+
+    def _invalidate_cache(self):
+        self._familiarity_cache = None
+        self._absence_hours_cache = None
+        self._absence_reaction_cache = None
+        self._last_computed_time = 0
 
     @property
     def familiarity(self) -> str:
-        if self.interactions_count < 5:
-            return "陌生人"
-        elif self.interactions_count < 20:
-            return "刚认识"
-        elif self.interactions_count < 50:
-            return "熟人"
-        elif self.interactions_count < 100:
-            return "朋友"
-        else:
-            return "好朋友"
+        if self._familiarity_cache is None:
+            if self.interactions_count < 5:
+                self._familiarity_cache = "陌生人"
+            elif self.interactions_count < 20:
+                self._familiarity_cache = "刚认识"
+            elif self.interactions_count < 50:
+                self._familiarity_cache = "熟人"
+            elif self.interactions_count < 100:
+                self._familiarity_cache = "朋友"
+            else:
+                self._familiarity_cache = "好朋友"
+        return self._familiarity_cache
 
     @property
     def absence_hours(self) -> float:
-        if not self.last_seen:
-            return 999.0
-        try:
-            last = datetime.fromisoformat(self.last_seen)
-            delta = datetime.now() - last
-            return delta.total_seconds() / 3600
-        except (ValueError, TypeError):
-            return 999.0
+        if self._absence_hours_cache is None:
+            if not self.last_seen:
+                self._absence_hours_cache = 999.0
+            else:
+                try:
+                    last = datetime.fromisoformat(self.last_seen)
+                    delta = datetime.now() - last
+                    self._absence_hours_cache = delta.total_seconds() / 3600
+                except (ValueError, TypeError):
+                    self._absence_hours_cache = 999.0
+        return self._absence_hours_cache
 
     @property
     def absence_reaction(self) -> str:
-        hours = self.absence_hours
-        if hours < 1:
-            return "刚才还聊着呢"
-        elif hours < 6:
-            return "刚才还聊着呢"
-        elif hours < 24:
-            return "今天又来啦"
-        elif hours < 72:
-            return "好几天没见"
-        elif hours < 168:
-            return "一个星期没见了"
-        else:
-            return "好久好久了"
+        if self._absence_reaction_cache is None:
+            hours = self.absence_hours
+            if hours < 1:
+                self._absence_reaction_cache = "刚才还聊着呢"
+            elif hours < 6:
+                self._absence_reaction_cache = "刚才还聊着呢"
+            elif hours < 24:
+                self._absence_reaction_cache = "今天又来啦"
+            elif hours < 72:
+                self._absence_reaction_cache = "好几天没见"
+            elif hours < 168:
+                self._absence_reaction_cache = "一个星期没见了"
+            else:
+                self._absence_reaction_cache = "好久好久了"
+        return self._absence_reaction_cache
 
 
 class RelationshipManager:
@@ -68,6 +85,7 @@ class RelationshipManager:
         self._ltm = long_term_memory
         self._logger = logger
         self._state = RelationshipState()
+        self._state_description_cache: str | None = None
         self._load_state()
 
     def _load_state(self):
@@ -110,6 +128,8 @@ class RelationshipManager:
     def update(self, user_input: str, agent_emotion: EmotionResult | dict[str, Any], response: str) -> None:
         self._state.interactions_count += 1
         self._state.last_seen = datetime.now().isoformat()
+        self._state._invalidate_cache()
+        self._state_description_cache = None
 
         if isinstance(agent_emotion, EmotionResult):
             emotion = agent_emotion.primary_emotion
@@ -170,6 +190,9 @@ class RelationshipManager:
             return "非常亲密、会直接表达情感、放肆"
 
     def get_state_description(self) -> str:
+        if self._state_description_cache is not None:
+            return self._state_description_cache
+
         lines = [
             f"关系阶段：{self._state.familiarity}",
             f"亲密度：{self._state.intimacy:.2f}",
@@ -179,4 +202,6 @@ class RelationshipManager:
         if self._state.absence_hours > 1:
             lines.append(f"上次互动：{self._state.absence_reaction}")
         lines.append(f"说话风格：{self.get_greeting_style()}")
-        return "；".join(lines)
+        result = "；".join(lines)
+        self._state_description_cache = result
+        return result

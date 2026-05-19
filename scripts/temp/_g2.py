@@ -1,0 +1,1 @@
+import sys\nprint(sys.argv)\n

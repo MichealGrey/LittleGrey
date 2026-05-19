@@ -1,0 +1,1 @@
+import base64,sys\nopen(sys.argv[1]," wb\).write(base64.b64decode(open(sys.argv[2]).read()))

@@ -1,17 +1,14 @@
 import hashlib
 import json
-import math
 import random
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any
 
 from src.agent.emotion_cache import EmotionCache
-from src.agent.decay_strategy import DecayStrategy, ExponentialDecay, LinearDecay, StepDecay
 from src.agent.emotion_result import EmotionResult, EmotionItem
-from src.agent.emotion_storage import EmotionStateStorage
 from src.agent.llm import LLMClient
 from src.core.config import EmotionConfig
 from src.core.logger import AgentLogger
@@ -33,38 +30,24 @@ class EmotionEngine:
         self.logger = logger
         self._config = config or EmotionConfig()
         self._last_interaction_time: float = time.monotonic()
-        self._baseline: dict[str, float] = {}
-        for dim in self._config.dimensions:
-            self._baseline[dim] = getattr(self._config, f'baseline_{dim}', 0.0)
+        self._baseline: dict[str, float] = {
+            "happy": self._config.baseline_happy,
+            "sad": self._config.baseline_sad,
+            "angry": self._config.baseline_angry,
+            "anxious": self._config.baseline_anxious,
+            "excited": self._config.baseline_excited,
+        }
         self._mood_journal: list[MoodEntry] = []
         self._baseline_adaptation_rate: float = 0.001
         self._relationship: Any = None
-        self._levels: dict[str, float] = {dim: 0.0 for dim in self._config.dimensions}
+        self._levels: dict[str, float] = {
+            "happy": 0.0, "sad": 0.0, "angry": 0.0,
+            "anxious": 0.0, "excited": 0.0,
+        }
         self._last_update: float = time.monotonic()
         self._last_result: EmotionResult | None = None
         self._emotion_cache = EmotionCache(max_size=128, threshold=0.85)
         self._loaded_emotion_levels: dict[str, float] | None = None
-        self._decay_strategies: Dict[str, DecayStrategy] = self._init_decay_strategies()
-        self._storage = EmotionStateStorage()
-
-    def _init_decay_strategies(self) -> Dict[str, DecayStrategy]:
-        strategies = {}
-        for dim in self._config.dimensions:
-            strategy_config = self._config.decay_strategies.get(dim)
-            if strategy_config:
-                if strategy_config.strategy_type == 'exponential':
-                    strategies[dim] = ExponentialDecay(rate=strategy_config.rate)
-                elif strategy_config.strategy_type == 'linear':
-                    strategies[dim] = LinearDecay(duration_hours=strategy_config.duration_hours)
-                elif strategy_config.strategy_type == 'step':
-                    strategies[dim] = StepDecay(interval_hours=strategy_config.interval_hours, decay_factor=strategy_config.decay_factor)
-            else:
-                default = self._config.decay_strategies.get('default')
-                if default and default.strategy_type == 'exponential':
-                    strategies[dim] = ExponentialDecay(rate=default.rate)
-                else:
-                    strategies[dim] = ExponentialDecay(rate=0.02)
-        return strategies
 
     def understand(self, text: str) -> EmotionResult:
         self._last_interaction_time = time.monotonic()
@@ -204,7 +187,7 @@ class EmotionEngine:
         }
         bar_width = 10
         lines = []
-        for emo in self._config.dimensions:
+        for emo in ["happy", "sad", "angry", "anxious", "excited"]:
             level = self._levels[emo]
             filled = int(level * bar_width)
             empty = bar_width - filled
@@ -231,20 +214,12 @@ class EmotionEngine:
 
     def _decay(self) -> None:
         elapsed = time.monotonic() - self._last_update
-        elapsed_hours = elapsed / 3600.0
-        
+        decay = max(0.0, 1.0 - elapsed / 300)
         for emo in self._levels:
             baseline = self._baseline.get(emo, 0.0)
-            strategy = self._decay_strategies.get(emo)
-            if strategy:
-                self._levels[emo] = strategy.calculate(self._levels[emo], baseline, elapsed_hours)
-            else:
-                decay = math.exp(-0.02 * elapsed_hours)
-                self._levels[emo] = baseline + (self._levels[emo] - baseline) * decay
-            
-            if self._levels[emo] < self._config.min_threshold:
+            self._levels[emo] = baseline + (self._levels[emo] - baseline) * decay
+            if self._levels[emo] < 0.005:
                 self._levels[emo] = baseline
-        
         self._last_update = time.monotonic()
 
     def _snapshot(self) -> dict[str, Any]:
@@ -286,42 +261,6 @@ class EmotionEngine:
             opp = opposites.get(emotion)
             if opp and opp in self._baseline:
                 self._baseline[opp] = max(0.0, self._baseline[opp] - self._baseline_adaptation_rate * 0.5)
-
-    def recall_trigger(self, memory_event: dict[str, Any]) -> None:
-        """当回忆起特定记忆事件时，重新触发对应情绪。
-        
-        Args:
-            memory_event: 记忆事件，包含 type 和 emotion_impact 字段
-        """
-        event_type = memory_event.get('type', '')
-        emotion_impact = memory_event.get('emotion_impact', {})
-        
-        trigger_map = {
-            'conflict': {'angry': 0.4, 'sad': 0.2, 'anxious': 0.15},
-            'threat': {'angry': 0.5, 'anxious': 0.3},
-            'insult': {'angry': 0.6, 'sad': 0.3},
-            'abandon': {'sad': 0.5, 'anxious': 0.2},
-            'caring': {'happy': 0.3, 'excited': 0.1},
-            'apology': {'happy': 0.2, 'sad': 0.1},
-        }
-        
-        trigger_emotions = trigger_map.get(event_type, {})
-        
-        for emo, min_intensity in trigger_emotions.items():
-            if emo in self._levels:
-                self._levels[emo] = max(self._levels[emo], min_intensity)
-        
-        for emo, impact in emotion_impact.items():
-            if emo in self._levels:
-                self._levels[emo] = max(self._levels[emo], min(impact, 0.5))
-        
-        self._last_update = time.monotonic()
-        if any(self._levels.get(e, 0) > 0.1 for e in trigger_emotions):
-            self._record_mood(
-                emotion=event_type,
-                intensity=max(trigger_emotions.values()) if trigger_emotions else 0.3,
-                trigger=f"memory_recall: {event_type}"
-            )
 
     def get_recent_mood(self, hours: float = 24.0) -> dict[str, Any]:
         cutoff = time.monotonic() - hours * 3600
@@ -480,8 +419,9 @@ class EmotionEngine:
             self.logger.log("emotion", "autonomous_tick", output_data=self._snapshot())
         return self._snapshot()
 
-    def _save_emotion_state(self, long_term_memory: Any = None) -> None:
-        """Save emotion state to JSON file."""
+    def _save_emotion_state(self, long_term_memory: Any) -> None:
+        if not long_term_memory:
+            return
         try:
             recent_journals = [
                 {
@@ -494,23 +434,28 @@ class EmotionEngine:
                 }
                 for e in self._mood_journal[-10:]
             ]
-            state_data = {
-                "levels": self._levels.copy(),
-                "baseline": self._baseline.copy(),
-                "recent_journal": recent_journals,
-                "last_interaction_time": self._last_interaction_time,
-            }
-            self._storage.save(state_data)
-        except Exception as e:
+            long_term_memory.store(
+                "emotion_state",
+                metadata={
+                    "type": "emotion_state",
+                    "levels": self._levels.copy(),
+                    "baseline": self._baseline.copy(),
+                    "recent_journal": recent_journals,
+                    "last_interaction_time": self._last_interaction_time,
+                    "saved_at": time.time(),
+                },
+            )
+        except Exception:
             pass
 
-    def _load_emotion_state(self, long_term_memory: Any = None) -> None:
-        """Load emotion state from JSON file."""
+    def _load_emotion_state(self, long_term_memory: Any) -> None:
+        if not long_term_memory:
+            return
         try:
-            data = self._storage.load()
-            if not data:
+            results = long_term_memory.search("emotion_state", n=1)
+            if not results:
                 return
-            
+            data = results[0].get("metadata", {})
             saved_levels = data.get("levels")
             if saved_levels:
                 self._loaded_emotion_levels = {}
@@ -519,13 +464,11 @@ class EmotionEngine:
                         val = max(0.0, min(1.0, float(val)))
                         self._levels[emo] = val
                         self._loaded_emotion_levels[emo] = val
-            
             saved_baseline = data.get("baseline")
             if saved_baseline:
                 for emo, val in saved_baseline.items():
                     if emo in self._baseline:
                         self._baseline[emo] = max(0.0, min(0.15, float(val)))
-            
             recent_journal = data.get("recent_journal", [])
             for entry in recent_journal:
                 mood_entry = MoodEntry(
@@ -537,21 +480,11 @@ class EmotionEngine:
                     summary=entry.get("summary", ""),
                 )
                 self._mood_journal.append(mood_entry)
-            
-            # Apply decay based on time since save
             saved_at = data.get("saved_at", 0)
             if saved_at > 0:
-                elapsed_hours = (time.time() - saved_at) / 3600.0
+                elapsed = time.time() - saved_at
+                decay_factor = max(0.0, 1.0 - (elapsed / 86400) * 0.5)
                 for emo in self._levels:
-                    baseline = self._baseline.get(emo, 0.0)
-                    strategy = self._decay_strategies.get(emo)
-                    if strategy:
-                        self._levels[emo] = strategy.calculate(self._levels[emo], baseline, elapsed_hours)
-                    else:
-                        decay = math.exp(-0.02 * elapsed_hours)
-                        self._levels[emo] = baseline + (self._levels[emo] - baseline) * decay
-                    
-                    if self._levels[emo] < self._config.min_threshold:
-                        self._levels[emo] = baseline
+                    self._levels[emo] *= decay_factor
         except Exception:
             pass

@@ -1,16 +1,16 @@
 # Agent Configuration
 
 llm:
-  provider: ""  # 火山引擎
-  model: ""  # 替换为你自己的方舟模型端点ID
-  base_url: ""  # 按需修改区域
+  provider: "volcengine"  # 火山引擎
+  model: "ep-20260517212026-dp7mh"  # 替换为你自己的方舟模型端点ID
+  base_url: "https://ark.cn-beijing.volces.com/api/v3"  # 按需修改区域
   temperature: 0.7
-  max_tokens: 2000
-  api_key: ""  # 替换为你自己的API密钥
+  max_tokens: 1000
+  api_key: "37693bb2-c558-4f1e-b3f8-399308270dc7"  # 替换为你自己的API密钥
 
 memory:
-  short_term_max: 20
-  summary_threshold: 15
+  short_term_max: 10
+  summary_threshold: 8
   vector_db_path: "storage/vector_db"
   embedding_model: "paraphrase-multilingual-MiniLM-L12-v2"
   chat_history_path: "storage/chat_history"
@@ -19,8 +19,8 @@ storage:
   files_path: "storage/files"
 
 agent:
-  max_steps: 10
-  max_retries: 2
+  max_steps: 5
+  max_retries: 1
   human_in_the_loop: true
   heartbeat_enabled: true
   heartbeat_interval: 3000  # 用户无输入多久后Agent主动说话（秒）
