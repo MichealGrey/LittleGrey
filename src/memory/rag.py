@@ -14,9 +14,18 @@ class RAG:
         cached = self._cache.get(query)
         if cached is not None:
             return cached
-        results = self.long_term.search(query, top_k=self.top_k)
+        results = self.long_term.search(query, top_k=self.top_k * 2)
         if not results:
             return ""
+
+        for item in results:
+            meta = item.get("metadata", {})
+            importance = meta.get("importance", 0.5)
+            base_relevance = item.get("relevance", 0)
+            item["relevance"] = base_relevance * (0.5 + importance * 0.5)
+
+        results.sort(key=lambda x: x.get("relevance", 0), reverse=True)
+        results = results[:self.top_k]
 
         context_parts = []
         for item in results:

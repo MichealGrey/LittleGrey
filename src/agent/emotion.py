@@ -12,6 +12,7 @@ from src.agent.emotion_cache import EmotionCache
 from src.agent.decay_strategy import DecayStrategy, ExponentialDecay, LinearDecay, StepDecay
 from src.agent.emotion_result import EmotionResult, EmotionItem
 from src.agent.emotion_storage import EmotionStateStorage
+from src.agent.motivation_state import MotivationState
 from src.agent.llm import LLMClient
 from src.core.config import EmotionConfig
 from src.core.logger import AgentLogger
@@ -46,6 +47,9 @@ class EmotionEngine:
         self._loaded_emotion_levels: dict[str, float] | None = None
         self._decay_strategies: Dict[str, DecayStrategy] = self._init_decay_strategies()
         self._storage = EmotionStateStorage()
+        self._motivation = MotivationState()
+        self._motivation_cache_time: float = 0.0
+        self._motivation_cache_ttl: float = 300.0
 
     def _init_decay_strategies(self) -> Dict[str, DecayStrategy]:
         strategies = {}
@@ -85,6 +89,7 @@ class EmotionEngine:
 
         self._emotion_cache.put(text, result)
         self._merge_to_core(result)
+        self._update_motivation(result)
         self._last_result = result
         return result
     def _merge_with_loaded_emotion(self, result: EmotionResult) -> None:
@@ -368,6 +373,23 @@ class EmotionEngine:
 
     def set_relationship(self, relationship: Any) -> None:
         self._relationship = relationship
+
+    def _update_motivation(self, result: EmotionResult) -> None:
+        now = time.monotonic()
+        if now - self._motivation_cache_time < self._motivation_cache_ttl:
+            return
+        self._motivation = MotivationState.from_dict({
+            "my_need": result.my_need,
+            "my_desire": result.my_desire,
+            "my_energy": result.my_energy,
+            "wants_interaction": result.wants_interaction,
+            "wants_solitude": result.wants_solitude,
+            "feels_purposeless": result.feels_purposeless,
+        })
+        self._motivation_cache_time = now
+
+    def get_motivation(self) -> MotivationState:
+        return self._motivation
 
     def _time_mood_shift(self, hour: int) -> dict[str, float]:
         shifts = {"happy": 0.0, "sad": 0.0, "angry": 0.0, "anxious": 0.0, "excited": 0.0}

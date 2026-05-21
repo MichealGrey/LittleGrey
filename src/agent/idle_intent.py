@@ -85,7 +85,6 @@ class IdleIntentAnalyzer:
         return "\n".join(f"{m.role}: {m.content}" for m in recent)
 
     def _llm_analyze(self, recent_context: str, idle_minutes: float, time_hint: str) -> dict[str, Any] | None:
-        # 构建情绪上下文
         emotion_section = ""
         if self._emotion_analyzer:
             state = self._emotion_analyzer.get_current_state()
@@ -99,6 +98,12 @@ class IdleIntentAnalyzer:
                     + "\n如果用户情绪为负面（sad/angry/anxious）且强度较高，应优先判断为 emotional。\n"
                 )
 
+        motivation_section = ""
+        if self._emotion_analyzer:
+            motivation = self._emotion_analyzer.get_motivation()
+            if motivation and motivation.has_drive():
+                motivation_section = f"\n你此刻的感受：{motivation.to_prompt_snippet()}\n"
+
         messages = [
             {
                 "role": "system",
@@ -107,7 +112,8 @@ class IdleIntentAnalyzer:
                     f"根据最近的对话内容和用户沉默的时长，判断用户沉默的原因和可能的下一步意图。\n\n"
                     f"当前时间：{time_hint}\n"
                     f"用户沉默时长：{idle_minutes:.0f}分钟\n"
-                    f"{emotion_section}\n"
+                    f"{emotion_section}"
+                    f"{motivation_section}"
                     f"沉默原因分类：\n"
                     f"- thinking: 用户在思考刚才讨论的内容，需要时间消化\n"
                     f"- emotional: 用户可能情绪低落或陷入情绪中，不愿继续说话\n"

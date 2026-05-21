@@ -23,6 +23,7 @@ from src.agent.relationship import RelationshipManager
 from src.core.config import AppConfig, load_config
 from src.core.gate import PriorityGate
 from src.core.logger import AgentLogger
+from src.core.thought_logger import ThoughtLogger
 from src.core.types import ToolResult
 from src.executor.engine import ExecutionEngine
 from src.executor.registry import ToolRegistry, get_registry
@@ -49,7 +50,8 @@ class AgentApp:
         self.registry = get_registry()
         self._register_tools()
 
-        self.llm = LLMClient(self.config.llm, self.config.personality)
+        self.thought_logger = ThoughtLogger(self.config.resolve_path(self.config.logging.path) / "thoughts")
+        self.llm = LLMClient(self.config.llm, self.config.personality, self.thought_logger)
         self.planner = Planner(self.config.agent)
         self.reflector = Reflector(self.llm, self.config.agent.max_retries)
         self.emotion = EmotionEngine(llm=self.llm, logger=self.logger)
@@ -364,14 +366,24 @@ class AgentApp:
             if isinstance(emotion, EmotionResult):
                 emo = emotion.primary_emotion
                 intensity = emotion.primary_intensity
+                weight = emotion.memory_weight
+                summary = emotion.memory_summary
             else:
                 emo = emotion.get("emotion", "neutral")
                 intensity = emotion.get("intensity", 0)
+                weight = emotion.get("memory_weight", 0.5)
+                summary = ""
 
             if intensity >= 0.6 and emo != "neutral":
                 self.long_term.store(
                     f"用户情绪[{emo}]: {user_input}",
-                    metadata={"type": "emotional_event", "emotion": emo},
+                    metadata={"type": "emotional_event", "emotion": emo, "importance": weight},
+                )
+
+            if summary:
+                self.long_term.store(
+                    summary,
+                    metadata={"type": "interaction_summary", "importance": weight},
                 )
 
     def _check_memory_recall_trigger(self, user_input: str) -> None:

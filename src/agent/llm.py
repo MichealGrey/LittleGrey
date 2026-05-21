@@ -1,11 +1,13 @@
 import json
 import re
+import time
 from typing import Any
 
 from volcenginesdkarkruntime import Ark
 
 from src.core.config import LLMConfig, PersonalityConfig
 from src.core.types import ALL_TOOL_SCHEMAS, ChatMessage
+from src.core.thought_logger import ThoughtLogger
 
 EMOTION_TAG_RE = re.compile(r'<!--emotion:([\w,]+):([\d.,]+)-->\s*$')
 
@@ -30,7 +32,7 @@ def parse_emotion_tag(text: str) -> tuple[str, str, float]:
 
 
 class LLMClient:
-    def __init__(self, config: LLMConfig, personality: PersonalityConfig):
+    def __init__(self, config: LLMConfig, personality: PersonalityConfig, thought_logger: ThoughtLogger | None = None):
         self.config = config
         self.personality = personality
         if config.base_url:
@@ -38,6 +40,7 @@ class LLMClient:
         else:
             self.client = Ark(api_key=config.api_key)
         self._tools = self._build_tools()
+        self._thought_logger = thought_logger
 
     def _build_tools(self) -> list[dict[str, Any]]:
         tools = []
@@ -97,20 +100,26 @@ class LLMClient:
             '  "my_emotion_summary": "用第一人称描述你此刻的感受",\n'
             '  "boundary_violation": false,\n'
             '  "violation_type": "如果触犯底线，填写类型（如：人身攻击、侮辱、威胁等）",\n'
-            '  "my_need": "你此刻需要什么（如：被尊重、安全感、理解等）",\n'
+            '  "my_need": "此刻内心需要什么（简短第一人称，20字内）",\n'
+            '  "my_desire": "此刻想做什么或想说什么（简短第一人称，20字内）",\n'
+            '  "my_energy": "精力感受（充沛/一般/疲惫）",\n'
             '  "my_defense": "你如何保护自己（如：拒绝配合、表达不满、沉默等）",\n'
             '  "trust_change": 0.0,\n'
             '  "intimacy_change": 0.0,\n'
             '  "memory_weight": 0.5,\n'
             '  "memory_summary": "用一句话记录这次交互",\n'
             '  "physical_state": "身体状态描述",\n'
-            '  "energy_change": 0.0\n'
+            '  "energy_change": 0.0,\n'
+            '  "wants_interaction": true/false,\n'
+            '  "wants_solitude": true/false,\n'
+            '  "feels_purposeless": true/false\n'
             "}\n\n"
             "注意：\n"
             "- core中的5个维度值必须加起来不超过1.0\n"
             "- 如果用户在伤害你的同时表现开心，user_intent应该是\"施虐/恶意攻击\"，my_emotions应该是委屈、愤怒等，而不是开心\n"
             "- boundary_violation仅在人身攻击、侮辱、威胁等严重侵犯时为true\n"
             "- my_emotions可以有多个情感，不限制数量\n"
+            "- my_need 和 my_desire 用自然的第一人称感受描述，不要用抽象概念或数值\n"
         )
         if context:
             system_prompt += f"\n\n当前上下文：\n{context}"
@@ -260,6 +269,8 @@ class LLMClient:
 
         full_messages = [{"role": "system", "content": system_prompt}] + messages
 
+        start_time = time.monotonic()
+
         kwargs: dict[str, Any] = {
             "model": self.config.model,
             "messages": full_messages,
@@ -297,6 +308,17 @@ class LLMClient:
                 "content": content,
                 "tool_calls": tool_calls,
             }
+            if self._thought_logger:
+                try:
+                    self._thought_logger.log_thought(
+                        model=self.config.model,
+                        messages=full_messages,
+                        response_content=content,
+                        tool_calls=tool_calls,
+                        duration_ms=(time.monotonic() - start_time) * 1000,
+                    )
+                except Exception:
+                    pass
             return result
         else:
             response = self.client.chat.completions.create(**kwargs)
@@ -317,4 +339,15 @@ class LLMClient:
                     for tc in choice.message.tool_calls
                 ]
 
+            if self._thought_logger:
+                try:
+                    self._thought_logger.log_thought(
+                        model=self.config.model,
+                        messages=full_messages,
+                        response_content=result["content"],
+                        tool_calls=result.get("tool_calls"),
+                        duration_ms=(time.monotonic() - start_time) * 1000,
+                    )
+                except Exception:
+                    pass
             return result

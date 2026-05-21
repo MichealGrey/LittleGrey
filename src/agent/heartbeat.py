@@ -100,8 +100,14 @@ class Heartbeat:
         if self._on_idle:
             self._on_idle()
 
-        # 意图判断：分析用户沉默原因，选择混合回应策略
         idle_seconds = time.monotonic() - self._last_active
+
+        motivation = self._emotion_analyzer.get_motivation() if self._emotion_analyzer else None
+
+        if motivation and motivation.wants_solitude:
+            self.logger.log("heartbeat", "solitude_desired", output_data={"need": motivation.current_need})
+            return
+
         intent = None
         if self._intent_analyzer:
             intent = self._intent_analyzer.analyze(idle_seconds)
@@ -118,7 +124,15 @@ class Heartbeat:
             self.logger.log("heartbeat", "intent_response", output_data={"action": intent["action"]})
             return
 
-        # proactive：继续原有 heartbeat 逻辑
+        if self._emotion_analyzer:
+            action = self._decide_action_by_motivation(idle_seconds, motivation)
+            if action == "rest":
+                self.logger.log("heartbeat", "rest_by_motivation")
+                return
+            if action == "care":
+                self._send_care_message()
+                return
+
         if self._gate and not self._gate.wait_for_turn(timeout=120):
             self.logger.log("heartbeat", "yielding", status="skip")
             return
@@ -279,6 +293,63 @@ class Heartbeat:
         except Exception as e:
             self.logger.log("heartbeat", "compose_error", status="error", error=str(e))
             return ""
+
+    def _decide_action_by_motivation(self, idle_seconds: float, motivation: Any | None) -> str:
+        if not motivation or not motivation.has_drive():
+            return "proactive"
+
+        idle_minutes = idle_seconds / 60
+        motivation_context = motivation.to_prompt_snippet()
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    f"你是{self.personality.name}。对方已经{idle_minutes:.0f}分钟没说话了。\n"
+                    f"你现在的感受：{motivation_context}\n"
+                    f"根据你此刻真实的感受，决定要不要主动说话、说什么。\n"
+                    f'返回JSON：{{"action": "rest/care/share", "reason": "简短原因"}}\n'
+                    f"action说明：\n"
+                    f"- rest: 不想说话，保持安静\n"
+                    f"- care: 想关心对方一句\n"
+                    f"- share: 想分享自己此刻的想法\n"
+                ),
+            },
+        ]
+
+        try:
+            result = self.llm.chat(messages, use_tools=False)
+            content = result.get("content", "")
+            parsed = json.loads(content)
+            return parsed.get("action", "share")
+        except (json.JSONDecodeError, TypeError, Exception):
+            return "share"
+
+    def _send_care_message(self) -> None:
+        hour = datetime.now().hour
+        time_hint = self._time_hint(hour)
+        motivation = self._emotion_analyzer.get_motivation() if self._emotion_analyzer else None
+        care_context = motivation.to_prompt_snippet() if motivation else ""
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    f"你是{self.personality.name}，现在{time_hint}了。{care_context}\n"
+                    f"对方好久没说话了，你想自然地发一句关心的话。\n"
+                    f"像朋友发消息一样随意，不要追问，不要说教，不超过2句话。"
+                ),
+            },
+        ]
+
+        try:
+            result = self.llm.chat(messages, use_tools=False)
+            content = result.get("content", "")
+            if content:
+                self.short_term.add("assistant", content)
+                self.on_message(content)
+        except Exception as e:
+            self.logger.log("heartbeat", "care_error", status="error", error=str(e))
 
     @staticmethod
     def _time_hint(hour: int) -> str:

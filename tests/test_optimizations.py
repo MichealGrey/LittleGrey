@@ -176,7 +176,7 @@ class TestRAGWithCache:
         rag = RAG(long_term_memory=mock_long_term, top_k=3)
         rag.retrieve("test")
 
-        mock_long_term.search.assert_called_once_with("test", top_k=3)
+        mock_long_term.search.assert_called_once_with("test", top_k=6)
 
 
 class TestRelationshipOptimization:

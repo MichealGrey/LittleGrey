@@ -18,6 +18,8 @@ class EmotionResult:
     boundary_violation: bool = False
     violation_type: str = ""
     my_need: str = ""
+    my_desire: str = ""
+    my_energy: str = ""
     my_defense: str = ""
     trust_change: float = 0.0
     intimacy_change: float = 0.0
@@ -25,6 +27,9 @@ class EmotionResult:
     memory_summary: str = ""
     physical_state: str = ""
     energy_change: float = 0.0
+    wants_interaction: bool = False
+    wants_solitude: bool = False
+    feels_purposeless: bool = False
 
     @property
     def primary_emotion(self) -> str:
@@ -62,6 +67,8 @@ class EmotionResult:
             boundary_violation=bool(data.get("boundary_violation", False)),
             violation_type=data.get("violation_type", ""),
             my_need=data.get("my_need", ""),
+            my_desire=data.get("my_desire", ""),
+            my_energy=data.get("my_energy", ""),
             my_defense=data.get("my_defense", ""),
             trust_change=float(data.get("trust_change", 0.0)),
             intimacy_change=float(data.get("intimacy_change", 0.0)),
@@ -69,4 +76,7 @@ class EmotionResult:
             memory_summary=data.get("memory_summary", ""),
             physical_state=data.get("physical_state", ""),
             energy_change=float(data.get("energy_change", 0.0)),
+            wants_interaction=bool(data.get("wants_interaction", False)),
+            wants_solitude=bool(data.get("wants_solitude", False)),
+            feels_purposeless=bool(data.get("feels_purposeless", False)),
         )
